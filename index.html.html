@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa Sanitario Interactivo - Río Gallegos 2026</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Estilos personalizados para los marcadores en forma de pin */
+        .pin-marker {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            border: 2px solid #ffffff;
+            transition: all 0.2s ease-in-out;
+        }
+        .pin-marker i {
+            transform: rotate(45deg);
+            font-size: 15px;
+            color: #ffffff;
+        }
+        .pin-marker:hover {
+            transform: rotate(-45deg) scale(1.15);
+            z-index: 1000 !important;
+        }
+
+        /* Colores según tipo */
+        .pin-hospital { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+        .pin-provincial { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+        .pin-municipal { background: linear-gradient(135deg, #f59e0b, #d97706); }
+
+        /* Pulso de atención en Hospital */
+        .pulse-hospital::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0; left: 0;
+            border-radius: 50% 50% 50% 0;
+            background: rgba(239, 68, 68, 0.4);
+            animation: pulse-ring 1.8s infinite;
+            z-index: -1;
+        }
+        @keyframes pulse-ring {
+            0% { transform: rotate(-45deg) scale(1); opacity: 0.8; }
+            100% { transform: rotate(-45deg) scale(1.8); opacity: 0; }
+        }
+
+        /* Scrollbar del panel lateral */
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-slate-100 h-screen flex flex-col md:flex-row overflow-hidden">
+
+    <!-- PANEL LATERAL PROFESIONAL -->
+    <aside class="w-full md:w-96 bg-white h-full shadow-2xl flex flex-col z-[1000] border-r border-slate-200">
+        
+        <!-- CABECERA INSTITUCIONAL -->
+        <div class="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-5 shadow-md">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-400 text-lg shadow-inner">
+                    <i class="fa-solid fa-hospital"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold tracking-tight text-white leading-tight">Mapa Sanitario 2026</h1>
+                    <p class="text-xs text-sky-300 font-medium">Río Gallegos, Santa Cruz</p>
+                </div>
+            </div>
+
+            <!-- CONTADORES DINÁMICOS -->
+            <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+                <div class="bg-slate-800/80 p-2 rounded-md border border-slate-700/80">
+                    <span id="cntTotal" class="block text-base font-extrabold text-sky-400">16</span>
+                    <span class="text-[9px] uppercase font-semibold tracking-wider text-slate-400">Centros</span>
+                </div>
+                <div class="bg-slate-800/80 p-2 rounded-md border border-slate-700/80">
+                    <span id="cntProv" class="block text-base font-extrabold text-blue-400">9</span>
+                    <span class="text-[9px] uppercase font-semibold tracking-wider text-slate-400">Provincial</span>
+                </div>
+                <div class="bg-slate-800/80 p-2 rounded-md border border-slate-700/80">
+                    <span id="cntMuni" class="block text-base font-extrabold text-amber-400">7</span>
+                    <span class="text-[9px] uppercase font-semibold tracking-wider text-slate-400">Municipal</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- BUSCADOR Y FILTROS -->
+        <div class="p-4 bg-slate-50 border-b border-slate-200 space-y-3">
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                <input type="text" id="searchInput" placeholder="Buscar por centro, calle o barrio..." 
+                       class="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm transition-all"
+                       onkeyup="filterData()">
+            </div>
+
+            <div class="flex gap-1.5 text-[11px]">
+                <button onclick="setFilter('all')" id="f-all" class="filter-b flex-1 py-1.5 rounded-md font-semibold bg-slate-900 text-white shadow-sm">Todos</button>
+                <button onclick="setFilter('provincial')" id="f-provincial" class="filter-b flex-1 py-1.5 rounded-md font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-100">Provincial</button>
+                <button onclick="setFilter('municipal')" id="f-municipal" class="filter-b flex-1 py-1.5 rounded-md font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-100">Municipal</button>
+            </div>
+        </div>
+
+        <!-- LISTA Y SECCIONES DESPLEGABLES -->
+        <div class="flex-1 overflow-y-auto custom-scroll p-4 space-y-3">
+
+            <!-- SECCIÓN DESPLEGABLE: LEYENDA TÉCNICA -->
+            <div class="border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm">
+                <button onclick="toggleSection('sec-leyenda')" class="w-full px-3.5 py-2.5 bg-slate-100/80 flex justify-between items-center text-xs font-bold text-slate-700 hover:bg-slate-200/60 transition-colors">
+                    <span class="flex items-center gap-2"><i class="fa-solid fa-layer-group text-sky-600"></i> Referencias del Plano</span>
+                    <i id="ico-sec-leyenda" class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform"></i>
+                </button>
+                <div id="sec-leyenda" class="hidden p-3 text-xs space-y-2 border-t border-slate-200 bg-slate-50">
+                    <div class="flex items-center gap-2.5">
+                        <span class="w-3.5 h-3.5 rounded-full bg-blue-600 border border-white shadow-sm"></span>
+                        <span class="text-slate-700">CAPS Provincial / CAI (8 Nivel I + 1 CAI)</span>
+                    </div>
+                    <div class="flex items-center gap-2.5">
+                        <span class="w-3.5 h-3.5 rounded-full bg-amber-500 border border-white shadow-sm"></span>
+                        <span class="text-slate-700">Centro Municipal (7 Establecimientos)</span>
+                    </div>
+                    <div class="flex items-center gap-2.5">
+                        <span class="w-3.5 h-3.5 rounded-full bg-red-600 border border-white shadow-sm"></span>
+                        <span class="text-slate-700 font-bold">Hospital Regional Río Gallegos</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CONTENEDOR TARJETAS -->
+            <div id="listCards" class="space-y-2"></div>
+
+            <!-- SECCIÓN DESPLEGABLE: NOTA METODOLÓGICA Y FUENTE -->
+            <div class="border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm">
+                <button onclick="toggleSection('sec-notas')" class="w-full px-3.5 py-2.5 bg-slate-100/80 flex justify-between items-center text-xs font-bold text-slate-700 hover:bg-slate-200/60 transition-colors">
+                    <span class="flex items-center gap-2"><i class="fa-solid fa-circle-info text-slate-500"></i> Metodología e Integridad</span>
+                    <i id="ico-sec-notas" class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform"></i>
+                </button>
+                <div id="sec-notas" class="hidden p-3 text-[11px] text-slate-600 space-y-2 border-t border-slate-200 bg-slate-50 leading-relaxed">
+                    <p>• <strong>CAPS N.º 2 y CAI:</strong> Son establecimientos contiguos en Pasaje Zucarino; se representan separados visualmente para facilitar su lectura.</p>
+                    <p>• <strong>Base Cartográfica:</strong> Capas viales de OpenStreetMap y Esri World Street Map con relevamiento territorial local (Octubre 2026).</p>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+
+    <!-- MAPA PRINCIPAL -->
+    <main class="flex-1 h-full relative">
+        <div id="map" class="w-full h-full"></div>
+    </main>
+
+    <!-- SCRIPT DE MAPA E INTERACTIVIDAD -->
+    <script>
+        // BASE DE DATOS GEORREFERENCIADA E INTEGRADA AL DOCUMENTO
+        const healthData = [
+            { id: 1, name: "CAPS provincial N.º 1", address: "Pasteur y Perito Moreno", type: "provincial", lat: -51.6225, lng: -69.2175, dep: "Provincial", img: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=400&q=80" },
+            { id: 2, name: "CAPS provincial N.º 2", address: "Pasaje Zucarino (junto al CAI)", type: "provincial", lat: -51.6280, lng: -69.2250, dep: "Provincial", img: "https://images.unsplash.com/photo-1586773860418-d37222d8fce3?auto=format&fit=crop&w=400&q=80" },
+            { id: 3, name: "CAPS provincial N.º 3", address: "Alvear e/ Pozos y Las Piedras", type: "provincial", lat: -51.6310, lng: -69.2200, dep: "Provincial", img: "https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=400&q=80" },
+            { id: 4, name: "CAPS provincial N.º 4", address: "San José Obrero 550", type: "provincial", lat: -51.6150, lng: -69.2100, dep: "Provincial", img: "https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&w=400&q=80" },
+            { id: 5, name: "CAPS provincial N.º 5", address: "Carnota s/n, e/ Perón y Laprida", type: "provincial", lat: -51.6350, lng: -69.2400, dep: "Provincial", img: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=400&q=80" },
+            { id: 6, name: "CAPS provincial N.º 7", address: "Arturo Illia 2306 (Juan Pablo II)", type: "provincial", lat: -51.6275, lng: -69.2050, dep: "Provincial", img: "https://images.unsplash.com/photo-1586773860418-d37222d8fce3?auto=format&fit=crop&w=400&q=80" },
+            { id: 7, name: "CAPS provincial N.º 9", address: "Calle 34 e/ 13 y 17 (San Benito)", type: "provincial", lat: -51.6500, lng: -69.1500, dep: "Provincial", img: "https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=400&q=80" },
+            { id: 8, name: "Centro de Atención Infantil (CAI)", address: "Pasaje Zucarino 646", type: "provincial", lat: -51.6283, lng: -69.2254, dep: "Provincial", img: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=400&q=80" },
+            { id: 9, name: "Hospital Regional Río Gallegos", address: "José Ingenieros 98", type: "hospital", lat: -51.6210, lng: -69.2150, dep: "Hospital Regional", img: "https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?auto=format&fit=crop&w=400&q=80" },
+            { id: 10, name: "CAPS Dr. F. J. Peliche", address: "Av. Néstor Kirchner 2364", type: "municipal", lat: -51.6290, lng: -69.2300, dep: "Municipal", img: "https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&w=400&q=80" },
+            { id: 11, name: "Centro Dr. Arthur W. Fenton", address: "Zapiola y Antonio Soto", type: "municipal", lat: -51.6120, lng: -69.2280, dep: "Municipal", img: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=400&q=80" },
+            { id: 12, name: "Madre Teresa de Calcuta (CIC)", address: "Batalla Puerto Argentino 455", type: "municipal", lat: -51.6400, lng: -69.2500, dep: "Municipal", img: "https://images.unsplash.com/photo-1586773860418-d37222d8fce3?auto=format&fit=crop&w=400&q=80" },
+            { id: 13, name: "Dr. Pablo Borelli", address: "Costa Rica y Las Heras", type: "municipal", lat: -51.6180, lng: -69.2120, dep: "Municipal", img: "https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&w=400&q=80" },
+            { id: 14, name: "CAPS Bicentenario", address: "Calles 13 y 44", type: "municipal", lat: -51.6600, lng: -69.1800, dep: "Municipal", img: "https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&w=400&q=80" },
+            { id: 15, name: "CAPS Dr. René Ferrada", address: "Santiago Ramón y Cajal y G. Posadas", type: "municipal", lat: -51.6250, lng: -69.2180, dep: "Municipal", img: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=400&q=80" },
+            { id: 16, name: "CAPS Enfermero Tito Moreno", address: "Gimnasio Rocha (Eva Perón y J. Miranda)", type: "municipal", lat: -51.6320, lng: -69.2450, dep: "Municipal", img: "https://images.unsplash.com/photo-1586773860418-d37222d8fce3?auto=format&fit=crop&w=400&q=80" }
+        ];
+
+        let activeFilter = 'all';
+        const markersMap = {};
+
+        // INICIALIZACIÓN DEL MAPA CON CAPAS INTERACTIVAS
+        const map = L.map('map', { zoomControl: false }).setView([-51.6250, -69.2150], 13);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // CAPAS BASE
+        const esriStreet = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 18,
+            attribution: 'Esri World Street Map'
+        }).addTo(map);
+
+        const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 18,
+            attribution: 'Esri Satellite'
+        });
+
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: 'OpenStreetMap'
+        });
+
+        L.control.layers({
+            "Callejero Esri (Claro)": esriStreet,
+            "Satelital HD": satellite,
+            "OpenStreetMap": osm
+        }, null, { position: 'topright' }).addTo(map);
+
+        // CREACIÓN DE PIN PERSONALIZADO
+        function createCustomPin(type) {
+            let pinClass = type === 'hospital' ? 'pin-hospital pulse-hospital' : (type === 'provincial' ? 'pin-provincial' : 'pin-municipal');
+            let iconClass = type === 'hospital' ? 'fa-hospital' : 'fa-house-medical';
+
+            return L.divIcon({
+                className: 'custom-leaflet-pin',
+                html: `<div class="pin-marker ${pinClass}"><i class="fa-solid ${iconClass}"></i></div>`,
+                iconSize: [36, 36],
+                iconAnchor: [18, 36],
+                popupAnchor: [0, -32]
+            });
+        }
+
+        // RENDERIZADO DE MARCADORES EN EL MAPA
+        healthData.forEach(item => {
+            const marker = L.marker([item.lat, item.lng], { icon: createCustomPin(item.type) }).addTo(map);
+
+            const badgeBg = item.type === 'hospital' ? 'bg-red-500' : (item.type === 'provincial' ? 'bg-blue-600' : 'bg-amber-500');
+
+            const popupContent = `
+                <div class="w-60 overflow-hidden rounded-lg font-sans">
+                    <img src="${item.img}" alt="${item.name}" class="w-full h-24 object-cover">
+                    <div class="p-3 bg-white">
+                        <span class="inline-block text-[9px] font-bold text-white uppercase px-2 py-0.5 rounded ${badgeBg} mb-1">${item.dep}</span>
+                        <h3 class="font-bold text-slate-800 text-xs leading-snug">${item.name}</h3>
+                        <p class="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><i class="fa-solid fa-location-dot text-slate-400"></i> ${item.address}</p>
+                        <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.name + ' Río Gallegos')}" target="_blank" 
+                           class="mt-2.5 flex items-center justify-center gap-1.5 w-full bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold py-1.5 rounded transition-colors shadow">
+                           <i class="fa-solid fa-diamond-turn-right text-xs text-sky-400"></i> Cómo llegar en Google Maps
+                        </a>
+                    </div>
+                </div>
+            `;
+
+            marker.bindPopup(popupContent, { maxWidth: 260, className: 'custom-popup' });
+            markersMap[item.id] = marker;
+        });
+
+        // RENDERIZADO TARJETAS EN LISTA LATERAL
+        function renderCards(list) {
+            const container = document.getElementById('listCards');
+            container.innerHTML = '';
+
+            if (list.length === 0) {
+                container.innerHTML = `<p class="text-center text-xs text-slate-400 py-6">No se encontraron resultados.</p>`;
+                return;
+            }
+
+            list.forEach(item => {
+                const borderClr = item.type === 'hospital' ? 'border-l-4 border-l-red-500' : (item.type === 'provincial' ? 'border-l-4 border-l-blue-600' : 'border-l-4 border-l-amber-500');
+
+                const card = document.createElement('div');
+                card.className = `p-3 bg-white border border-slate-200 rounded-r-lg shadow-sm hover:shadow-md transition-all cursor-pointer ${borderClr}`;
+                card.innerHTML = `
+                    <div class="flex items-start justify-between gap-2">
+                        <h4 class="text-xs font-bold text-slate-800 leading-snug">${item.name}</h4>
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${item.type === 'hospital' ? 'bg-red-50 text-red-600' : (item.type === 'provincial' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600')}">${item.type}</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                        <i class="fa-solid fa-map-pin text-[10px] text-slate-400"></i> ${item.address}
+                    </p>
+                `;
+
+                card.onclick = () => {
+                    map.flyTo([item.lat, item.lng], 16, { duration: 1.2 });
+                    markersMap[item.id].openPopup();
+                };
+
+                container.appendChild(card);
+            });
+        }
+
+        // LÓGICA DE FILTRADO
+        function filterData() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+
+            const filtered = healthData.filter(item => {
+                const matchType = (activeFilter === 'all') || 
+                                  (activeFilter === 'provincial' && (item.type === 'provincial' || item.type === 'hospital')) ||
+                                  (activeFilter === 'municipal' && item.type === 'municipal');
+                const matchQuery = item.name.toLowerCase().includes(query) || item.address.toLowerCase().includes(query);
+                return matchType && matchQuery;
+            });
+
+            // Actualizar mapa
+            healthData.forEach(item => {
+                if (filtered.some(f => f.id === item.id)) {
+                    map.addLayer(markersMap[item.id]);
+                } else {
+                    map.removeLayer(markersMap[item.id]);
+                }
+            });
+
+            renderCards(filtered);
+        }
+
+        function setFilter(filterType) {
+            activeFilter = filterType;
+            document.querySelectorAll('.filter-b').forEach(btn => {
+                btn.className = "filter-b flex-1 py-1.5 rounded-md font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-100";
+            });
+            document.getElementById(`f-${filterType}`).className = "filter-b flex-1 py-1.5 rounded-md font-semibold bg-slate-900 text-white shadow-sm";
+            filterData();
+        }
+
+        function toggleSection(id) {
+            const el = document.getElementById(id);
+            const ico = document.getElementById(`ico-${id}`);
+            el.classList.toggle('hidden');
+            ico.classList.toggle('rotate-180');
+        }
+
+        // Carga inicial
+        renderCards(healthData);
+    </script>
+</body>
+</html>
